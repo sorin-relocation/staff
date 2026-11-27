@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SŌRIN スタッフフォーム</title>
+<style>
+:root{--navy:#102f40;--teal:#167d78;--gold:#d4af37;--ink:#20313a;--muted:#71818a;--line:#e4eaed;--bg:#f4f7f8}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{max-width:760px;margin:0 auto;padding:20px 14px}.head{background:var(--navy);color:white;padding:20px;border-radius:16px}.head strong{display:block;font-size:18px}.head small{color:#c8d8dd}.card{background:white;border:1px solid var(--line);border-radius:14px;padding:18px;margin-top:14px}.muted{color:var(--muted);font-size:13px;line-height:1.7}.field{display:grid;gap:7px;margin:12px 0}.field input{width:100%;padding:13px;border:1px solid var(--line);border-radius:9px;font:inherit}.btn{width:100%;border:0;border-radius:9px;background:var(--teal);color:white;padding:13px 16px;font-weight:700;font:inherit;cursor:pointer}.btn:disabled{opacity:.55;cursor:wait}.status{font-size:14px;line-height:1.7}.item{padding:12px 0;border-bottom:1px solid var(--line)}.item:last-child{border-bottom:0}.item small{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}.item strong{display:block;white-space:pre-wrap;overflow-wrap:anywhere}.hidden{display:none!important}
+</style>
+</head>
+<body><main class="wrap"><header class="head"><strong>SŌRIN スタッフフォーム</strong><small>スタッフIDで登録・案件確認</small></header>
+<section class="card" id="entry"><p class="muted" id="formHelp">スタッフIDを入力してください。</p><form id="staffForm"><label class="field">スタッフID<input id="staffId" name="staffId" autocomplete="off" inputmode="numeric" required pattern="[0-9]+" placeholder="例：001"></label><button class="btn" id="submitBtn" type="submit">担当案件を見る</button></form><p id="status" class="status" role="status"></p></section>
+<section class="card hidden" id="cases"><p class="status" id="caseStatus">案件情報を確認しています…</p><div id="details"></div></section>
+<p class="muted">このページでは、スタッフに許可された案件情報だけを表示します。</p></main>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+// 公開可能な設定値のみ。LIFF IDとSupabase URL・publishable keyは公開情報を設定する。
+const LIFF_ID='SET_LIFF_ID';
+const SUPABASE_URL='SET_SUPABASE_URL';
+const SUPABASE_PUBLISHABLE_KEY='SET_SUPABASE_PUBLISHABLE_KEY';
+const ACCEPT_FUNCTION='staff-accept-invite';
+const VIEW_FUNCTION='staff-my-cases';
+const statusEl=document.getElementById('status');
+const form=document.getElementById('staffForm');
+const submitBtn=document.getElementById('submitBtn');
+const inviteToken=new URL(location.href).searchParams.get('staff_invite');
+let inviteAccepted=false;
+function configReady(){return ![LIFF_ID,SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY].some(v=>v.startsWith('SET_'))}
+async function invoke(name,body){const r=await fetch(`${SUPABASE_URL}/functions/v1/${name}`,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_PUBLISHABLE_KEY,'Authorization':`Bearer ${SUPABASE_PUBLISHABLE_KEY}`},body:JSON.stringify(body)});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||'処理に失敗しました。管理者に連絡してください。');return data}
+function addItem(label,value){if(value===null||value===undefined||String(value).trim()==='')return;const row=document.createElement('div');row.className='item';const small=document.createElement('small');small.textContent=label;const strong=document.createElement('strong');strong.textContent=String(value);row.append(small,strong);document.getElementById('details').append(row)}
+async function main(){if(!configReady()){statusEl.textContent='ページの接続設定（LIFF ID・Supabase）が未設定です。';submitBtn.disabled=true;return}try{await liff.init({liffId:LIFF_ID});if(!liff.isLoggedIn()){liff.login({redirectUri:location.href});return}if(inviteToken){document.getElementById('formHelp').textContent='招待リンクから開いています。LINE連携のためスタッフIDを入力してください。';submitBtn.textContent='LINEと連携する';}else{document.getElementById('formHelp').textContent='案件を見るたびにスタッフIDを入力してください。LINE連携済みの本人確認も行います。';submitBtn.textContent='担当案件を見る';}}catch(e){statusEl.textContent='LINEを起動できませんでした。LINE内でページを開き直してください。';submitBtn.disabled=true}}
+form.addEventListener('submit',async e=>{e.preventDefault();const staffId=document.getElementById('staffId').value.trim();if(!/^\d+$/.test(staffId)){statusEl.textContent='スタッフIDは数字で入力してください。';return}if(!configReady())return;submitBtn.disabled=true;statusEl.textContent='本人確認をしています…';try{const idToken=liff.getIDToken();if(!idToken)throw new Error('LINEの本人確認情報を取得できませんでした。LINE内で開き直してください。');if(inviteToken&&!inviteAccepted){const linked=await invoke(ACCEPT_FUNCTION,{inviteToken,staffId,idToken});if(!linked.success)throw new Error(linked.error||'LINE連携に失敗しました。');inviteAccepted=true;statusEl.textContent='LINE連携が完了しました。続けて、案件を見るためにスタッフIDをもう一度入力してください。';document.getElementById('staffId').value='';document.getElementById('formHelp').textContent='案件を見るため、スタッフIDを再入力してください。';submitBtn.textContent='担当案件を見る';submitBtn.disabled=false;return}const result=await invoke(VIEW_FUNCTION,{staffId,idToken});if(result.success===false)throw new Error(result.error||'スタッフIDを確認できませんでした。');const list=Array.isArray(result.cases)?result.cases:[];const details=document.getElementById('details');details.replaceChildren();list.forEach((c,i)=>{if(i){const hr=document.createElement('hr');details.append(hr)}addItem('案件番号',c.case_no);addItem('作業日時',c.work_datetime);addItem('作業内容',c.work_summary);addItem('住所',c.address);addItem('立寄所',c.stops);addItem('作業上の注意',c.notes)});document.getElementById('cases').classList.remove('hidden');document.getElementById('caseStatus').textContent=list.length?'担当案件':'現在、表示できる担当案件はありません。';statusEl.textContent='本人確認ができました。';document.getElementById('staffId').value='';}catch(err){statusEl.textContent=err.message||'処理に失敗しました。';}finally{submitBtn.disabled=false}});
+main();
+</script></body></html>
